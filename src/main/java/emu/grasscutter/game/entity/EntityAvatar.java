@@ -39,6 +39,7 @@ import emu.grasscutter.utils.ProtoHelper;
 import emu.grasscutter.utils.Utils;
 import it.unimi.dsi.fastutil.ints.Int2FloatMap;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
+import lombok.val;
 
 public class EntityAvatar extends GameEntity {
     private final Avatar avatar;
@@ -161,9 +162,22 @@ public class EntityAvatar extends GameEntity {
         }
     }
 
+    // for single entity avatar only I guess
+    public boolean addEnergy(float amount) {
+        FightProperty curEnergyProp = this.getAvatar().getSkillDepot().getElementType().getCurEnergyProp();
+        float curEnergy = this.getFightProperty(curEnergyProp);
+        if (curEnergy == amount){
+            return false;
+        }
+        this.getAvatar().setCurrentEnergy(curEnergyProp, amount);
+        this.getScene().broadcastPacket(new PacketEntityFightPropUpdateNotify(this, curEnergyProp));
+        return true;
+    }
+
     public void addEnergy(float amount, PropChangeReason reason) {
         this.addEnergy(amount, reason, false);
     }
+    
     public void addEnergy(float amount, PropChangeReason reason, boolean isFlat) {
         // Get current and maximum energy for this avatar.
         FightProperty curEnergyProp = this.getAvatar().getSkillDepot().getElementType().getCurEnergyProp();
@@ -187,27 +201,31 @@ public class EntityAvatar extends GameEntity {
         if (newEnergy != curEnergy) {
             this.avatar.setCurrentEnergy(curEnergyProp, newEnergy);
 
+            // I only see EntityFightPropUpdataNotify being sent by the official server, and without any prop reason, 
+            // not sure how that differs to this 
             this.getScene().broadcastPacket(new PacketAvatarFightPropUpdateNotify(this.getAvatar(), curEnergyProp));
             this.getScene().broadcastPacket(new PacketEntityFightPropChangeReasonNotify(this, curEnergyProp, newEnergy, reason));
         }
     }
 
     public SceneAvatarInfo getSceneAvatarInfo() {
+        val avatar = this.getAvatar();
+        val player = this.getPlayer();
         SceneAvatarInfo.Builder avatarInfo = SceneAvatarInfo.newBuilder()
-                .setUid(this.getPlayer().getUid())
-                .setAvatarId(this.getAvatar().getAvatarId())
-                .setGuid(this.getAvatar().getGuid())
-                .setPeerId(this.getPlayer().getPeerId())
-                .addAllTalentIdList(this.getAvatar().getTalentIdList())
-                .setCoreProudSkillLevel(this.getAvatar().getCoreProudSkillLevel())
-                .putAllSkillLevelMap(this.getAvatar().getSkillLevelMap())
-                .setSkillDepotId(this.getAvatar().getSkillDepotId())
-                .addAllInherentProudSkillList(this.getAvatar().getProudSkillList())
-                .putAllProudSkillExtraLevelMap(this.getAvatar().getProudSkillBonusMap())
-                .addAllTeamResonanceList(this.getAvatar().getPlayer().getTeamManager().getTeamResonances())
-                .setWearingFlycloakId(this.getAvatar().getFlyCloak())
-                .setCostumeId(this.getAvatar().getCostume())
-                .setBornTime(this.getAvatar().getBornTime());
+                .setUid(player.getUid())
+                .setAvatarId(avatar.getAvatarId())
+                .setGuid(avatar.getGuid())
+                .setPeerId(player.getPeerId())
+                .addAllTalentIdList(avatar.getTalentIdList())
+                .setCoreProudSkillLevel(avatar.getCoreProudSkillLevel())
+                .putAllSkillLevelMap(avatar.getSkillLevelMap())
+                .setSkillDepotId(avatar.getSkillDepotId())
+                .addAllInherentProudSkillList(avatar.getProudSkillList())
+                .putAllProudSkillExtraLevelMap(avatar.getProudSkillBonusMap())
+                .addAllTeamResonanceList(player.getTeamManager().getTeamResonances())
+                .setWearingFlycloakId(avatar.getFlyCloak())
+                .setCostumeId(avatar.getCostume())
+                .setBornTime(avatar.getBornTime());
 
         for (GameItem item : avatar.getEquips().values()) {
             if (item.getItemData().getEquipType() == EquipType.EQUIP_WEAPON) {
@@ -244,13 +262,7 @@ public class EntityAvatar extends GameEntity {
             entityInfo.setMotionInfo(this.getMotionInfo());
         }
 
-        for (Int2FloatMap.Entry entry : getFightProperties().int2FloatEntrySet()) {
-            if (entry.getIntKey() == 0) {
-                continue;
-            }
-            FightPropPair fightProp = FightPropPair.newBuilder().setPropType(entry.getIntKey()).setPropValue(entry.getFloatValue()).build();
-            entityInfo.addFightPropList(fightProp);
-        }
+        this.addAllFightPropsToEntityInfo(entityInfo);
 
         PropPair pair = PropPair.newBuilder()
                 .setType(PlayerProperty.PROP_LEVEL.getId())

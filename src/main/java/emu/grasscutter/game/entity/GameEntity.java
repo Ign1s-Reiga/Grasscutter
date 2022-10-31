@@ -113,13 +113,10 @@ public abstract class GameEntity {
     }
 
     public void addAllFightPropsToEntityInfo(SceneEntityInfo.Builder entityInfo) {
-        for (Int2FloatMap.Entry entry : this.getFightProperties().int2FloatEntrySet()) {
-            if (entry.getIntKey() == 0) {
-                continue;
-            }
-            FightPropPair fightProp = FightPropPair.newBuilder().setPropType(entry.getIntKey()).setPropValue(entry.getFloatValue()).build();
-            entityInfo.addFightPropList(fightProp);
-        }
+        this.getFightProperties().forEach((key, value) -> {
+            if (key == 0) return;
+            entityInfo.addFightPropList(FightPropPair.newBuilder().setPropType(key).setPropValue(value).build());
+        });
     }
 
     protected MotionInfo getMotionInfo() {
@@ -182,6 +179,7 @@ public abstract class GameEntity {
             this.setFightProperty(FightProperty.FIGHT_PROP_CUR_HP, 0f);
             isDead = true;
         }
+        callLuaHPEvent();
 
         // Packets
         this.getScene().broadcastPacket(new PacketEntityFightPropUpdateNotify(this, FightProperty.FIGHT_PROP_CUR_HP));
@@ -191,6 +189,8 @@ public abstract class GameEntity {
             this.getScene().killEntity(this, killerId);
         }
     }
+
+    public void callLuaHPEvent(){ }
 
     /**
      * Move this entity to a new position.

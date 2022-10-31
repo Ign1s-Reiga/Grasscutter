@@ -9,6 +9,7 @@ import emu.grasscutter.data.excels.QuestData;
 import emu.grasscutter.data.excels.TriggerExcelConfigData;
 import emu.grasscutter.game.dungeons.DungeonPassConditionType;
 import emu.grasscutter.game.player.Player;
+import emu.grasscutter.game.props.ActionReason;
 import emu.grasscutter.game.quest.enums.QuestState;
 import emu.grasscutter.game.quest.enums.QuestTrigger;
 import emu.grasscutter.net.proto.ChapterStateOuterClass;
@@ -35,7 +36,7 @@ public class GameQuest {
     @Getter private int subQuestId;
     @Getter private int mainQuestId;
     @Getter @Setter
-    private QuestState state;
+    public QuestState state;
 
     @Getter @Setter private int startTime;
     @Getter @Setter private int acceptTime;
@@ -156,6 +157,8 @@ public class GameQuest {
         this.state = QuestState.QUEST_STATE_FINISHED;
         this.finishTime = Utils.getCurrentSeconds();
 
+        getOwner().sendPacket(new PacketQuestListUpdateNotify(this));
+
         if (getQuestData().finishParent()) {
             // This quest finishes the questline - the main quest will also save the quest to db, so we don't have to call save() here
             getMainQuest().finish();
@@ -175,6 +178,10 @@ public class GameQuest {
             ));
         }
 
+        // hard coding to give amber
+        if(getQuestData().getSubId() == 35402){
+            getOwner().getInventory().addItem(1021, 1, ActionReason.QuestItem); // amber item id
+        }
         Grasscutter.getLogger().debug("Quest {} is finished", subQuestId);
     }
 
@@ -183,13 +190,17 @@ public class GameQuest {
         this.state = QuestState.QUEST_STATE_FAILED;
         this.finishTime = Utils.getCurrentSeconds();
 
+        getOwner().sendPacket(new PacketQuestListUpdateNotify(this));
+
         //Some subQuests have conditions that subQuests fail (even from different MainQuests)
         getOwner().getQuestManager().queueEvent(QuestTrigger.QUEST_CONTENT_QUEST_STATE_EQUAL, this.subQuestId, this.state.getValue(),0,0,0);
         getOwner().getQuestManager().queueEvent(QuestTrigger.QUEST_COND_STATE_EQUAL, this.subQuestId, this.state.getValue(),0,0,0);
 
         getQuestData().getFailExec().forEach(e -> getOwner().getServer().getQuestSystem().triggerExec(this, e, e.getParam()));
 
+        Grasscutter.getLogger().debug("Quest {} is failed", subQuestId);
     }
+
     // Return true if it did the rewind
     public boolean rewind(boolean notifyDelete) {
         getMainQuest().getChildQuests().values().stream().filter(p -> p.getQuestData().getOrder() > this.getQuestData().getOrder()).forEach(q -> {

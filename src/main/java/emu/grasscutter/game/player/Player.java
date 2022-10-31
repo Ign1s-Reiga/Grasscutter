@@ -14,30 +14,30 @@ import emu.grasscutter.game.activity.ActivityManager;
 import emu.grasscutter.game.avatar.Avatar;
 import emu.grasscutter.game.avatar.AvatarStorage;
 import emu.grasscutter.game.battlepass.BattlePassManager;
-import emu.grasscutter.game.entity.*;
-import emu.grasscutter.game.home.GameHome;
+import emu.grasscutter.game.entity.GameEntity;
 import emu.grasscutter.game.expedition.ExpeditionInfo;
 import emu.grasscutter.game.friends.FriendsList;
 import emu.grasscutter.game.friends.PlayerProfile;
 import emu.grasscutter.game.gacha.PlayerGachaInfo;
+import emu.grasscutter.game.home.GameHome;
 import emu.grasscutter.game.inventory.GameItem;
 import emu.grasscutter.game.inventory.Inventory;
 import emu.grasscutter.game.mail.Mail;
 import emu.grasscutter.game.mail.MailHandler;
-import emu.grasscutter.game.managers.CookingManager;
+import emu.grasscutter.game.managers.cooking.ActiveCookCompoundData;
+import emu.grasscutter.game.managers.cooking.CookingCompoundManager;
+import emu.grasscutter.game.managers.cooking.CookingManager;
 import emu.grasscutter.game.managers.FurnitureManager;
 import emu.grasscutter.game.managers.ResinManager;
+import emu.grasscutter.game.managers.SotSManager;
 import emu.grasscutter.game.managers.deforestation.DeforestationManager;
 import emu.grasscutter.game.managers.energy.EnergyManager;
 import emu.grasscutter.game.managers.forging.ActiveForgeData;
 import emu.grasscutter.game.managers.forging.ForgingManager;
-import emu.grasscutter.game.managers.mapmark.*;
+import emu.grasscutter.game.managers.mapmark.MapMark;
+import emu.grasscutter.game.managers.mapmark.MapMarksManager;
 import emu.grasscutter.game.managers.stamina.StaminaManager;
-import emu.grasscutter.game.managers.SotSManager;
-import emu.grasscutter.game.props.ActionReason;
-import emu.grasscutter.game.props.ClimateType;
-import emu.grasscutter.game.props.PlayerProperty;
-import emu.grasscutter.game.props.WatcherTriggerType;
+import emu.grasscutter.game.props.*;
 import emu.grasscutter.game.quest.QuestManager;
 import emu.grasscutter.game.quest.enums.QuestTrigger;
 import emu.grasscutter.game.shop.ShopLimit;
@@ -46,17 +46,20 @@ import emu.grasscutter.game.tower.TowerManager;
 import emu.grasscutter.game.world.Scene;
 import emu.grasscutter.game.world.World;
 import emu.grasscutter.net.packet.BasePacket;
-import emu.grasscutter.net.proto.*;
 import emu.grasscutter.net.proto.AbilityInvokeEntryOuterClass.AbilityInvokeEntry;
 import emu.grasscutter.net.proto.AttackResultOuterClass.AttackResult;
 import emu.grasscutter.net.proto.CombatInvokeEntryOuterClass.CombatInvokeEntry;
 import emu.grasscutter.net.proto.GadgetInteractReqOuterClass.GadgetInteractReq;
 import emu.grasscutter.net.proto.MpSettingTypeOuterClass.MpSettingType;
 import emu.grasscutter.net.proto.OnlinePlayerInfoOuterClass.OnlinePlayerInfo;
+import emu.grasscutter.net.proto.PlayerApplyEnterMpResultNotifyOuterClass;
 import emu.grasscutter.net.proto.PlayerLocationInfoOuterClass.PlayerLocationInfo;
+import emu.grasscutter.net.proto.PlayerWorldLocationInfoOuterClass;
 import emu.grasscutter.net.proto.ProfilePictureOuterClass.ProfilePicture;
 import emu.grasscutter.net.proto.PropChangeReasonOuterClass.PropChangeReason;
+import emu.grasscutter.net.proto.ShowAvatarInfoOuterClass;
 import emu.grasscutter.net.proto.SocialDetailOuterClass.SocialDetail;
+import emu.grasscutter.net.proto.SocialShowAvatarInfoOuterClass;
 import emu.grasscutter.scripts.data.SceneRegion;
 import emu.grasscutter.server.event.player.PlayerJoinEvent;
 import emu.grasscutter.server.event.player.PlayerQuitEvent;
@@ -65,15 +68,13 @@ import emu.grasscutter.server.game.GameSession;
 import emu.grasscutter.server.game.GameSession.SessionState;
 import emu.grasscutter.server.packet.send.*;
 import emu.grasscutter.utils.DateHelper;
-import emu.grasscutter.utils.Position;
 import emu.grasscutter.utils.MessageHandler;
+import emu.grasscutter.utils.Position;
 import emu.grasscutter.utils.Utils;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import lombok.Getter;
 import lombok.Setter;
-
-import static emu.grasscutter.config.Configuration.*;
 
 import java.time.DayOfWeek;
 import java.time.Instant;
@@ -82,6 +83,8 @@ import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.LinkedBlockingQueue;
+
+import static emu.grasscutter.config.Configuration.GAME_OPTIONS;
 
 @Entity(value = "players", useDiscriminator = false)
 public class Player {
@@ -122,10 +125,12 @@ public class Player {
     @Getter private Map<Long, ExpeditionInfo> expeditionInfo;
     @Getter private Map<Integer, Integer> unlockedRecipies;
     @Getter private List<ActiveForgeData> activeForges;
+    @Getter private Map<Integer, ActiveCookCompoundData> activeCookCompounds;
     @Getter private Map<Integer, Integer> questGlobalVariables;
     @Getter private Map<Integer, Integer> openStates;
     @Getter @Setter private Map<Integer, Set<Integer>> unlockedSceneAreas;
     @Getter @Setter private Map<Integer, Set<Integer>> unlockedScenePoints;
+    @Getter @Setter private List<Integer> chatEmojiIdList;
 
     @Transient private long nextGuid = 0;
     @Transient @Getter @Setter private int peerId;
@@ -153,6 +158,7 @@ public class Player {
     @Getter private transient FurnitureManager furnitureManager;
     @Getter private transient BattlePassManager battlePassManager;
     @Getter private transient CookingManager cookingManager;
+    @Getter private transient CookingCompoundManager cookingCompoundManager;
     @Getter private transient ActivityManager activityManager;
     @Getter private transient PlayerBuffManager buffManager;
     @Getter private transient PlayerProgressManager progressManager;
@@ -224,12 +230,14 @@ public class Player {
         this.unlockedCombines = new HashSet<>();
         this.unlockedFurniture = new HashSet<>();
         this.unlockedFurnitureSuite = new HashSet<>();
+        this.activeCookCompounds=new HashMap<>();
         this.activeForges = new ArrayList<>();
         this.unlockedRecipies = new HashMap<>();
         this.questGlobalVariables = new HashMap<>();
         this.openStates = new HashMap<>();
         this.unlockedSceneAreas = new HashMap<>();
         this.unlockedScenePoints = new HashMap<>();
+        this.chatEmojiIdList = new ArrayList<>();
 
         this.attackResults = new LinkedBlockingQueue<>();
         this.coopRequests = new Int2ObjectOpenHashMap<>();
@@ -254,6 +262,7 @@ public class Player {
         this.progressManager = new PlayerProgressManager(this);
         this.furnitureManager = new FurnitureManager(this);
         this.cookingManager = new CookingManager(this);
+        this.cookingCompoundManager=new CookingCompoundManager(this);
     }
 
     // On player creation
@@ -288,6 +297,7 @@ public class Player {
         this.progressManager = new PlayerProgressManager(this);
         this.furnitureManager = new FurnitureManager(this);
         this.cookingManager = new CookingManager(this);
+        this.cookingCompoundManager=new CookingCompoundManager(this);
     }
 
     public int getUid() {
@@ -305,7 +315,7 @@ public class Player {
 
     public Account getAccount() {
         if (this.account == null)
-            this.account = DatabaseHelper.getAccountById(Integer.toString(this.id));
+            this.account = DatabaseHelper.getAccountById(this.accountId);
         return this.account;
     }
 
@@ -556,11 +566,11 @@ public class Player {
 
     public void onEnterRegion(SceneRegion region) {
         getQuestManager().forEachActiveQuest(quest -> {
-            if (quest.getTriggerData() != null && quest.getTriggers().containsKey("ENTER_REGION_"+ String.valueOf(region.config_id))) {
+            if (quest.getTriggerData() != null && quest.getTriggers().containsKey("ENTER_REGION_"+ region.config_id)) {
                 // If trigger hasn't been fired yet
-                if (!Boolean.TRUE.equals(quest.getTriggers().put("ENTER_REGION_"+ String.valueOf(region.config_id), true))) {
+                if (!Boolean.TRUE.equals(quest.getTriggers().put("ENTER_REGION_"+ region.config_id, true))) {
                     //getSession().send(new PacketServerCondMeetQuestListUpdateNotify());
-                    getQuestManager().queueEvent(QuestTrigger.QUEST_CONTENT_TRIGGER_FIRE, quest.getTriggerData().get("ENTER_REGION_"+ String.valueOf(region.config_id)).getId(),0);
+                    getQuestManager().queueEvent(QuestTrigger.QUEST_CONTENT_TRIGGER_FIRE, quest.getTriggerData().get("ENTER_REGION_"+ region.config_id).getId(),0);
                 }
             }
         });
@@ -569,11 +579,11 @@ public class Player {
 
     public void onLeaveRegion(SceneRegion region) {
         getQuestManager().forEachActiveQuest(quest -> {
-            if (quest.getTriggers().containsKey("LEAVE_REGION_"+ String.valueOf(region.config_id))) {
+            if (quest.getTriggers().containsKey("LEAVE_REGION_"+ region.config_id)) {
                 // If trigger hasn't been fired yet
-                if (!Boolean.TRUE.equals(quest.getTriggers().put("LEAVE_REGION_"+ String.valueOf(region.config_id), true))) {
+                if (!Boolean.TRUE.equals(quest.getTriggers().put("LEAVE_REGION_"+ region.config_id, true))) {
                     getSession().send(new PacketServerCondMeetQuestListUpdateNotify());
-                    getQuestManager().queueEvent(QuestTrigger.QUEST_CONTENT_TRIGGER_FIRE, quest.getTriggerData().get("LEAVE_REGION_"+ String.valueOf(region.config_id)).getId(),0);
+                    getQuestManager().queueEvent(QuestTrigger.QUEST_CONTENT_TRIGGER_FIRE, quest.getTriggerData().get("LEAVE_REGION_"+ region.config_id).getId(),0);
                 }
             }
         });
@@ -779,6 +789,11 @@ public class Player {
         addAvatar(avatar, true);
     }
 
+    public void addAvatar(int avatarId) {
+        // I dont see why we cant do this lolz
+        addAvatar(new Avatar(avatarId), true);
+    }
+
     public void addFlycloak(int flycloakId) {
         this.getFlyCloakList().add(flycloakId);
         this.sendPacket(new PacketAvatarGainFlycloakNotify(flycloakId));
@@ -940,7 +955,8 @@ public class Player {
                 .setIsShowAvatar(this.isShowAvatars())
                 .addAllShowAvatarInfoList(socialShowAvatarInfoList)
                 .addAllShowNameCardIdList(this.getShowNameCardInfoList())
-                .setFinishAchievementNum(0);
+                .setFinishAchievementNum(0)
+                .setFriendEnterHomeOptionValue(this.getHome() == null ? 0 : this.getHome().getEnterHomeOption());
         return social;
     }
 
@@ -1194,9 +1210,11 @@ public class Player {
         session.send(new PacketAllWidgetDataNotify(this));
         session.send(new PacketWidgetGadgetAllDataNotify());
         session.send(new PacketCombineDataNotify(this.unlockedCombines));
+        session.send(new PacketGetChatEmojiCollectionRsp(this.getChatEmojiIdList()));
         this.forgingManager.sendForgeDataNotify();
         this.resinManager.onPlayerLogin();
-        this.cookingManager.sendCookDataNofity();
+        this.cookingManager.sendCookDataNotify();
+        this.cookingCompoundManager.onPlayerLogin();
         this.teamManager.onPlayerLogin();
 
         getTodayMoonCard(); // The timer works at 0:0, some users log in after that, use this method to check if they have received a reward today or not. If not, send the reward.
@@ -1289,16 +1307,14 @@ public class Player {
 
         @Getter private final int value;
 
-        private SceneLoadState(int value) {
+        SceneLoadState(int value) {
             this.value = value;
         }
     }
 
     public int getPropertyMin(PlayerProperty prop) {
         if (prop.isDynamicRange()) {
-            return switch (prop) {
-                default -> 0;
-            };
+            return 0;
         } else {
             return prop.getMin();
         }
